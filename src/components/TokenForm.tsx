@@ -22,8 +22,8 @@ export default function TokenForm() {
     const client = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY! });
 
 
-    const createMetaData = async (name: string, symbol: string, image: string) => {
-        const metaData = JSON.stringify({ name, symbol, image });
+    const createMetaData = async (name: string, symbol: string, description: string, image: string) => {
+        const metaData = JSON.stringify({ name, symbol, description, image });
         const metaDataFile = new File([metaData], 'metadata.json', { type: 'application/json' });
         try {
             const result = await client.uploadFile(metaDataFile);
@@ -45,6 +45,7 @@ export default function TokenForm() {
             const metadataUri = await createMetaData(
                 name,
                 symbol,
+                description,
                 imageUrl
             );
 
@@ -187,8 +188,6 @@ export default function TokenForm() {
                             className="p-3 w-full h-20 resize-none rounded-md focus:outline-none text-black"
                         />
                     </div>
-
-
 
                     <button className="bg-[#512da8] text-white font-bold py-2 px-4 rounded w-full">
                         {isLoading ?
