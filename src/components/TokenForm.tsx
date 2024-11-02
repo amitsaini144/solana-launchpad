@@ -21,7 +21,7 @@ import { motion } from "framer-motion";
 import { useState, useCallback, useMemo } from "react";
 import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, Controller, Control } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 
@@ -369,8 +369,8 @@ export default function TokenForm() {
 function AuthorityToggle({ label, description, name, control }: {
     label: string;
     description: string;
-    name: string;
-    control: any;
+    name: keyof TokenFormData;
+    control: Control<TokenFormData>;
 }) {
     return (
         <div className="space-y-2">
@@ -381,7 +381,7 @@ function AuthorityToggle({ label, description, name, control }: {
                 control={control}
                 render={({ field: { onChange, value } }) => (
                     <Switch
-                        checked={value}
+                        checked={value as boolean}
                         onCheckedChange={onChange}
                     />
                 )}
