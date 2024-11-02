@@ -1,60 +1,94 @@
 "use client";
-import { createAssociatedTokenAccountInstruction, createInitializeMetadataPointerInstruction, createInitializeMintInstruction, createMintToInstruction, ExtensionType, getAssociatedTokenAddressSync, getMintLen, LENGTH_SIZE, TOKEN_2022_PROGRAM_ID, TYPE_SIZE, } from "@solana/spl-token";
+import {
+    AuthorityType,
+    createAssociatedTokenAccountInstruction,
+    createInitializeMetadataPointerInstruction,
+    createInitializeMintInstruction,
+    createMintToInstruction,
+    createSetAuthorityInstruction,
+    ExtensionType,
+    getAssociatedTokenAddressSync,
+    getMintLen,
+    LENGTH_SIZE,
+    TOKEN_2022_PROGRAM_ID,
+    TYPE_SIZE,
+} from "@solana/spl-token";
 import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { Keypair, SystemProgram, Transaction } from "@solana/web3.js";
 import { createInitializeInstruction, pack, TokenMetadata } from '@solana/spl-token-metadata';
 import { UploadClient } from '@uploadcare/upload-client'
 import { motion } from "framer-motion";
-import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { Switch } from "@/components/ui/switch"
+import { toast } from "sonner";
+import { useForm, Controller } from "react-hook-form";
+import { cn } from "@/lib/utils";
+import Link from "next/link";
+
+interface TokenFormData {
+    name: string;
+    symbol: string;
+    decimals: number;
+    imageUrl: string;
+    initialSupply: number;
+    description: string;
+    revokeFreezeAuth: boolean;
+    revokeUpdateAuth: boolean;
+    revokeMintAuth: boolean;
+}
 
 export default function TokenForm() {
-    const [name, setName] = useState("");
-    const [symbol, setSymbol] = useState("");
-    const [decimals, setDecimals] = useState(0);
-    const [imageUrl, setImageUrl] = useState("");
-    const [initialSupply, setInitialSupply] = useState(0);
-    const [description, setDescription] = useState("");
+    const { control, register, handleSubmit, reset, formState: { errors } } = useForm<TokenFormData>({
+        defaultValues: {
+            name: "",
+            symbol: "",
+            decimals: 6,
+            imageUrl: "",
+            initialSupply: 1,
+            description: "",
+            revokeFreezeAuth: false,
+            revokeMintAuth: false,
+        }
+    });
     const [isLoading, setIsLoading] = useState(false);
-
+    const [transaction, setTransaction] = useState<string | null>(null);
     const { connection } = useConnection();
     const wallet = useWallet();
-    const client = new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY! });
+
+    const uploadClient = useMemo(() =>
+        new UploadClient({ publicKey: process.env.NEXT_PUBLIC_UPLOADCARE_PUBLIC_KEY! }),
+        []);
 
 
-    const createMetaData = async (name: string, symbol: string, description: string, image: string) => {
-        const metaData = JSON.stringify({ name, symbol, description, image });
+    const createMetaData = useCallback(async (formData: TokenFormData) => {
+        const { name, symbol, description, imageUrl } = formData;
+        const metaData = JSON.stringify({ name, symbol, description, image: imageUrl });
         const metaDataFile = new File([metaData], 'metadata.json', { type: 'application/json' });
+
         try {
-            const result = await client.uploadFile(metaDataFile);
+            const result = await uploadClient.uploadFile(metaDataFile);
             return result.cdnUrl;
         } catch (e) {
-            console.error('Failed to upload metadata', e);
+            console.error('Failed to upload metadata');
             throw e;
         }
-    };
+    }, [uploadClient]);
 
-
-    async function createToken(e: React.FormEvent<HTMLFormElement>) {
-        e.preventDefault();
-        if (!wallet.publicKey) return alert("Please connect your wallet");
-
+    const onSubmit = async (formData: TokenFormData) => {
+        if (!wallet.publicKey) {
+            toast.error("Please connect your wallet");
+            return;
+        }
         setIsLoading(true);
 
         try {
-            const metadataUri = await createMetaData(
-                name,
-                symbol,
-                description,
-                imageUrl
-            );
-
+            const metadataUri = await createMetaData(formData);
             const mintKeypair = Keypair.generate();
 
             const metadata: TokenMetadata = {
                 mint: mintKeypair.publicKey,
-                name,
-                symbol,
+                name: formData.name,
+                symbol: formData.symbol,
                 uri: metadataUri,
                 additionalMetadata: []
             };
@@ -72,8 +106,19 @@ export default function TokenForm() {
                     lamports,
                     programId: TOKEN_2022_PROGRAM_ID,
                 }),
-                createInitializeMetadataPointerInstruction(mintKeypair.publicKey, wallet.publicKey, mintKeypair.publicKey, TOKEN_2022_PROGRAM_ID),
-                createInitializeMintInstruction(mintKeypair.publicKey, decimals, wallet.publicKey, null, TOKEN_2022_PROGRAM_ID),
+                createInitializeMetadataPointerInstruction(
+                    mintKeypair.publicKey,
+                    wallet.publicKey,
+                    mintKeypair.publicKey,
+                    TOKEN_2022_PROGRAM_ID
+                ),
+                createInitializeMintInstruction(
+                    mintKeypair.publicKey,
+                    formData.decimals,
+                    wallet.publicKey,
+                    formData.revokeFreezeAuth ? null : wallet.publicKey,
+                    TOKEN_2022_PROGRAM_ID
+                ),
                 createInitializeInstruction({
                     programId: TOKEN_2022_PROGRAM_ID,
                     metadata: mintKeypair.publicKey,
@@ -84,7 +129,6 @@ export default function TokenForm() {
                     symbol: metadata.symbol,
                     uri: metadata.uri,
                 }),
-
             );
 
             transaction.feePayer = wallet.publicKey;
@@ -92,16 +136,13 @@ export default function TokenForm() {
             transaction.partialSign(mintKeypair);
             const tx = await wallet.sendTransaction(transaction, connection);
 
-            console.log(tx);
-
+            toast.info("Minting Tokens");
             const associatedToken = getAssociatedTokenAddressSync(
                 mintKeypair.publicKey,
                 wallet.publicKey,
                 false,
                 TOKEN_2022_PROGRAM_ID,
             );
-
-            console.log(`AssociatedToken ${associatedToken.toBase58()}`);
 
             const transaction2 = new Transaction().add(
                 createAssociatedTokenAccountInstruction(
@@ -116,95 +157,235 @@ export default function TokenForm() {
             await wallet.sendTransaction(transaction2, connection);
 
             const transaction3 = new Transaction().add(
-                createMintToInstruction(mintKeypair.publicKey, associatedToken, wallet.publicKey, initialSupply, [], TOKEN_2022_PROGRAM_ID)
+                createMintToInstruction(
+                    mintKeypair.publicKey,
+                    associatedToken,
+                    wallet.publicKey,
+                    formData.initialSupply,
+                    [],
+                    TOKEN_2022_PROGRAM_ID)
             );
 
             await wallet.sendTransaction(transaction3, connection);
 
-            console.log("Minted!")
+            if (formData.revokeUpdateAuth || formData.revokeMintAuth) {
+                toast.info("Updating Authority");
+                const transaction4 = new Transaction();
+
+                if (formData.revokeMintAuth) {
+                    transaction4.add(
+                        createSetAuthorityInstruction(
+                            mintKeypair.publicKey,
+                            wallet.publicKey,
+                            AuthorityType.MintTokens,
+                            null,
+                            [],
+                            TOKEN_2022_PROGRAM_ID
+                        )
+                    );
+                }
+
+                await wallet.sendTransaction(transaction4, connection);
+                toast.success("Authority Updated Successfully");
+            }
+            toast.success("Tokens Minted Successfully");
+            setTransaction(tx);
+            setIsLoading(false)
+            reset()
         }
         catch (e) {
-            console.log(e)
-            setIsLoading(false);
-            return alert("Something went wrong");
+            console.error(e)
+            toast.error("Failed to create token");
+        } finally {
+            setIsLoading(false)
         }
     }
 
     return (
-        <>
-            <h1 className="text-4xl md:text-5xl font-bold text-center p-4">
-                Solana Token Launchpad
-            </h1>
-            <div className="flex justify-center p-6 w-full max-w-xl rounded-md">
-                <form onSubmit={createToken} className="flex flex-col items-center justify-center gap-2 w-full">
-                    <div className="flex gap-2 w-full">
-                        <input
-                            onChange={(e) => setName(e.target.value)}
-                            type="text"
-                            className="border-2 border-black p-3 text-black focus:outline-none w-full rounded-md"
-                            placeholder="Name"
-                            required
-                        />
-                        <input
-                            onChange={(e) => setSymbol(e.target.value)}
-                            type="text"
-                            className="border-2 border-black p-3 text-black focus:outline-none w-full rounded-md"
-                            placeholder="Symbol"
-                            required
-                        />
-                    </div>
-                    <div className="flex gap-2 w-full">
-                        <input
-                            onChange={(e) => setDecimals(Number(e.target.value))}
-                            min={1}
-                            type="number"
-                            className="border-2 border-black p-3 text-black focus:outline-none appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full rounded-md"
-                            placeholder="Decimals"
-                            required
-                        />
-                        <input
-                            onChange={(e) => setInitialSupply(Number(e.target.value))}
-                            min={1}
-                            type="number"
-                            className="border-2 border-black p-3 text-black focus:outline-none appearance-none [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none w-full rounded-md"
-                            placeholder="Lamports"
-                            required
-                        />
+        <div className="min-h-screen p-4 bg-gradient-to-b form-purple-900 to-black">
+            <div className="max-w-2xl mx-auto space-y-8 pt-32 pb-24">
+                <header className="text-center space-y-6">
+                    <h1 className="text-4xl md:text-5xl font-bold text-white">
+                        Solana Token Launchpad
+                    </h1>
+                    <p className="text-gray-300">
+                        Create your own Solana token in seconds
+                    </p>
+                </header>
+
+                <form
+                    onSubmit={handleSubmit(onSubmit)}
+                    className="space-y-6 bg-white/5 backdrop-blur-sm p-6 rounded-xl"
+                >
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-4">
+                            <label className="text-sm text-white">Name</label>
+                            <input
+                                {...register("name", { required: "Name is required" })}
+                                className={cn(
+                                    "w-full px-4 py-2 rounded-lg bg-white/10 border focus:ring-purple-500 text-white",
+                                    errors.name && "border-red-500"
+                                )}
+                            />
+                            {errors.name && <span className="text-xs text-red-500">{errors.name.message}</span>}
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="text-sm text-white">Symbol</label>
+                            <input
+                                {...register("symbol", { required: "Symbol is required" })}
+                                className={cn(
+                                    "w-full px-4 py-2 rounded-lg bg-white/10 border focus:ring-purple-500 text-white",
+                                    errors.symbol && "border-red-500"
+                                )}
+                            />
+                            {errors.symbol && <span className="text-xs text-red-500">{errors.symbol.message}</span>}
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="text-sm text-white">Decimals</label>
+                            <input
+                                type="number"
+                                {...register("decimals", {
+                                    required: "Decimals is required",
+                                    min: {
+                                        value: 1,
+                                        message: "Decimals must be at least 1"
+                                    },
+                                    max: {
+                                        value: 9,
+                                        message: "Decimals must be at most 9"
+                                    },
+                                    valueAsNumber: true,
+                                })}
+                                className={cn(
+                                    "w-full px-4 py-2 rounded-lg bg-white/10 border focus:ring-purple-500 text-white",
+                                    "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                                    errors.decimals && "border-red-500"
+                                )}
+
+                            />
+                            {errors.decimals && <span className="text-xs text-red-500">{errors.decimals.message}</span>}
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="text-sm text-white">Supply</label>
+                            <input
+                                type="number"
+                                {...register("initialSupply", {
+                                    required: "Supply is required",
+                                    min: {
+                                        value: 1,
+                                        message: "Supply must be at least 1"
+                                    },
+                                    valueAsNumber: true,
+                                })}
+                                className={cn(
+                                    "w-full px-4 py-2 rounded-lg bg-white/10 border focus:ring-purple-500 text-white",
+                                    "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                                    errors.initialSupply && "border-red-500"
+                                )}
+                            />
+                            {errors.initialSupply && <span className="text-xs text-red-500">{errors.initialSupply.message}</span>}
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="text-sm text-white">Image URL</label>
+                            <textarea
+                                {...register("imageUrl", { required: "imageUrl is required" })}
+                                className={cn(
+                                    "w-full h-20 px-4 py-2 rounded-lg bg-white/10 border focus:ring-purple-500 text-sm text-white resize-none",
+                                    errors.imageUrl && "border-red-500"
+                                )}
+                            />
+                            {errors.imageUrl && <span className="text-xs text-red-500">{errors.imageUrl.message}</span>}
+                        </div>
+
+                        <div className="space-y-4">
+                            <label className="text-sm text-white">Description</label>
+                            <textarea
+                                {...register("description", { required: "Description is required" })}
+                                className={cn(
+                                    "w-full h-20 px-4 py-2 rounded-lg bg-white/10 border focus:ring-purple-500 text-sm text-white resize-none",
+                                    errors.description && "border-red-500"
+                                )}
+                            />
+                            {errors.description && <span className="text-xs text-red-500">{errors.description.message}</span>}
+                        </div>
+
                     </div>
 
-                    <div className="flex flex-col w-full gap-3">
-                        <input
-                            onChange={(e) => setImageUrl(e.target.value)}
-                            type="text"
-                            className="border-2 border-black p-3 text-black focus:outline-none w-full rounded-md"
-                            placeholder="Image URL"
-                            required
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
+                        <AuthorityToggle
+                            label="Revoke Freeze Authority"
+                            description="Freeze Authority allows you to freeze token accounts"
+                            name="revokeFreezeAuth"
+                            control={control}
                         />
-
-                        <textarea
-                            required
-                            placeholder="Description"
-                            onChange={(e) => setDescription(e.target.value)}
-                            className="p-3 w-full h-20 resize-none rounded-md focus:outline-none text-black"
+                        <AuthorityToggle
+                            label="Revoke Mint Authority"
+                            description="Mint Authority allows you to mint more supply"
+                            name="revokeMintAuth"
+                            control={control}
                         />
                     </div>
+                    <button
+                        type="submit"
+                        disabled={isLoading}
+                        className={cn(
+                            "w-full py-3 px-4 rounded-lg bg-purple-600 text-white font-medium flex justify-center",
+                            "hover:bg-purple-700 transition-colors",
+                            "disabled:opacity-50 disabled::cursor-not-allowed",
+                        )}
+                    >
+                        {isLoading ? (
+                            <div className="flex gap-4">
+                                <motion.div
+                                    className="flex items-center justify-center gap-2 w-fit"
+                                    animate={{ rotate: 360 }}
+                                    transition={{ repeat: Infinity, duration: 0.8 }}
+                                >
+                                    <div className="w-5 h-5 border-t-2 border-white rounded-full animate-spin" />
+                                </motion.div>
+                                <p>Creating Token...</p>
+                            </div>
 
-                    <button className="bg-[#512da8] text-white font-bold py-2 px-4 rounded w-full">
-                        {isLoading ?
-                            <motion.div
-                                className="flex items-center justify-center"
-                                animate={{ rotate: 360 }}
-                                transition={{ repeat: Infinity, duration: 0.8, ease: "linear" }}
-                            >
-                                <Loader2 />
-                            </motion.div>
-                            :
+                        ) : (
                             "Create Token"
-                        }
+                        )}
                     </button>
                 </form>
+                {transaction &&
+                    <div className="flex items-center justify-center">
+                        <Link href={`https://explorer.solana.com/tx/${transaction}?cluster=devnet`} target="_blank">
+                            <p className="text-blue-500 hover:underline text-sm">View Transaction</p>
+                        </Link>
+                    </div>}
             </div>
-
-        </>
+        </div>
     )
+}
+
+function AuthorityToggle({ label, description, name, control }: {
+    label: string;
+    description: string;
+    name: string;
+    control: any;
+}) {
+    return (
+        <div className="space-y-2">
+            <label className="text-sm font-medium text-white">{label}</label>
+            <p className="text-xs text-gray-400">{description}</p>
+            <Controller
+                name={name}
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                    <Switch
+                        checked={value}
+                        onCheckedChange={onChange}
+                    />
+                )}
+            />
+        </div>
+    );
 }
