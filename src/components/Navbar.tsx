@@ -30,26 +30,13 @@ export default function Navbar() {
         setHidden(false)
     }, [])
 
-
-    if (!isClient) {
-        return <div className="flex items-center justify-center min-h-screen bg-black/90">
-            <div className="text-center">
-                <h1 className="text-4xl font-bold text-white">
-                    Loading...
-                </h1>
-                <p className="text-gray-300">
-                    Please wait while we load the page.
-                </p>
-            </div>
-        </div>;
-    }
     return (
         <motion.nav
             variants={variants}
             animate={hidden ? "hidden" : "visible"}
             transition={{ duration: 0.3, ease: "easeInOut" }}
             className="flex justify-end p-6 fixed top-0 right-0 z-50 w-full backdrop-blur-md">
-                <WalletMultiButton />
+            {!isClient ? <p className="text-white pr-10 pt-2">Loading...</p> : <WalletMultiButton />}
         </motion.nav>
     )
 }

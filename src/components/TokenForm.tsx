@@ -19,13 +19,13 @@ import { createInitializeInstruction, pack, TokenMetadata } from '@solana/spl-to
 import { UploadClient } from '@uploadcare/upload-client'
 import { motion } from "framer-motion";
 import { useState, useCallback, useMemo } from "react";
-import { Switch } from "@/components/ui/switch"
 import { toast } from "sonner";
-import { useForm, Controller, Control } from "react-hook-form";
+import { useForm } from "react-hook-form";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import AuthorityToggle from "./AuthorityToggle";
 
-interface TokenFormData {
+export interface TokenFormData {
     name: string;
     symbol: string;
     decimals: number;
@@ -95,7 +95,6 @@ export default function TokenForm() {
 
             const mintLen = getMintLen([ExtensionType.MetadataPointer]);
             const mintDataLen = TYPE_SIZE + LENGTH_SIZE + pack(metadata).length;
-
             const lamports = await connection.getMinimumBalanceForRentExemption(mintLen + mintDataLen);
 
             const transaction = new Transaction().add(
@@ -209,7 +208,7 @@ export default function TokenForm() {
                         Solana Token Launchpad
                     </h1>
                     <p className="text-gray-300">
-                        Create your own Solana token in seconds
+                        Create your own Solana token in Seconds
                     </p>
                 </header>
 
@@ -364,28 +363,4 @@ export default function TokenForm() {
             </div>
         </div>
     )
-}
-
-function AuthorityToggle({ label, description, name, control }: {
-    label: string;
-    description: string;
-    name: keyof TokenFormData;
-    control: Control<TokenFormData>;
-}) {
-    return (
-        <div className="space-y-2">
-            <label className="text-sm font-medium text-white">{label}</label>
-            <p className="text-xs text-gray-400">{description}</p>
-            <Controller
-                name={name}
-                control={control}
-                render={({ field: { onChange, value } }) => (
-                    <Switch
-                        checked={value as boolean}
-                        onCheckedChange={onChange}
-                    />
-                )}
-            />
-        </div>
-    );
 }
